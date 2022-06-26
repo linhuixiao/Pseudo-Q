@@ -15,6 +15,7 @@ def make_transforms(args, image_set, is_onestage=False):
 
     imsize = args.imsize
 
+    # TODO: 不一样，多了train_pseudo
     if image_set in ['train', 'train_pseudo']:
         scales = []
         if args.aug_scale:
@@ -45,7 +46,9 @@ def make_transforms(args, image_set, is_onestage=False):
             T.NormalizeAndPad(size=imsize, aug_translate=args.aug_translate)
         ])
 
+
     if image_set in ['val', 'test', 'testA', 'testB']:
+        # 现在还只是初始化一个预处理器，将图片沿着长边resize到目标大小，之后再将图片转化为tensor，之后再将短边补齐pad到目标size
         return T.Compose([
             T.RandomResize([imsize]),
             T.ToTensor(),
@@ -55,6 +58,9 @@ def make_transforms(args, image_set, is_onestage=False):
     raise ValueError(f'unknown {image_set}')
 
 
+# args.data_root default='./ln_data/', args.split_root default='data', '--dataset', default='referit'
+# split = test, testA, val, args.max_query_len = 20
+# TODO: 多加了 prompt_template=args.prompt, 其余和 TransVG 一模一样
 def build_dataset(split, args):
     return TransVGDataset(data_root=args.data_root,
                           split_root=args.split_root,

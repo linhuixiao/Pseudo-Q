@@ -11,6 +11,7 @@ from utils.box_utils import xyxy2xywh
 from utils.misc import interpolate
 
 
+# TODO: 这个文件没有任何改动
 def crop(image, box, region):
     cropped_image = F.crop(image, *region)
 
@@ -45,6 +46,7 @@ def resize_according_to_short_side(img, box, size):
     return img, box
 
 
+# object是最顶层的基类
 class Compose(object):
     def __init__(self, transforms):
         self.transforms = transforms

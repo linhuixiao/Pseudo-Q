@@ -134,6 +134,7 @@ class DatasetNotFoundError(Exception):
 
 class TransVGDataset(data.Dataset):
     SUPPORTED_DATASETS = {
+        # TODO: 数据集不一样，全部多了 train_pseudo
         'referit': {'splits': ('train', 'val', 'trainval', 'test', 'train_pseudo')},
         'unc': {
             'splits': ('train', 'val', 'trainval', 'testA', 'testB', 'train_pseudo'),
@@ -185,6 +186,7 @@ class TransVGDataset(data.Dataset):
             self.split_dir = osp.join(self.dataset_root, 'splits')
         elif self.dataset == 'flickr':
             self.dataset_root = osp.join(self.data_root, 'Flickr30k')
+            # TODO: 这里把 flickr30k_images 改为 flickr30k-images
             self.im_dir = osp.join(self.dataset_root, 'flickr30k-images')
         else:  ## refcoco, etc.
             self.dataset_root = osp.join(self.data_root, 'other')
@@ -251,6 +253,7 @@ class TransVGDataset(data.Dataset):
     def untokenize_word_vector(self, words):
         return self.corpus.dictionary[words]
 
+    # TODO: 新增
     def prompt(self, sample_list):
         n = len(sample_list)
         new_sample_list = []

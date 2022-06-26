@@ -14,6 +14,9 @@ from models import build_model
 from datasets import build_dataset
 from engine import evaluate
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = '7'  # batch_size max=768，0、1在用
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -47,6 +50,7 @@ def get_args_parser():
                         help="Name of model to be exploited.")
 
     # Transformers in two branches
+    """两个分支 bert 和 detr 的数量"""
     parser.add_argument('--bert_enc_num', default=12, type=int)
     parser.add_argument('--detr_enc_num', default=6, type=int)
 
@@ -56,13 +60,16 @@ def get_args_parser():
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
+    # 默认是用 sine embedding
     parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine', 'learned'),
                         help="Type of positional embedding to use on top of the image features")
     # * Transformer
+    # TODO: DETR 编码层和解码层的数量，解码层数量为0
     parser.add_argument('--enc_layers', default=6, type=int,
                         help="Number of encoding layers in the transformer")
     parser.add_argument('--dec_layers', default=0, type=int,
                         help="Number of decoding layers in the transformer")
+    """ 前馈层的维度 """
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int,
@@ -71,16 +78,17 @@ def get_args_parser():
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_queries', default=100, type=int,
-                        help="Number of query slots")
+    # 查询的数量
+    parser.add_argument('--num_queries', default=100, type=int, help="Number of query slots")
     parser.add_argument('--pre_norm', action='store_true')
-
+    """ 图像的大小 """
     parser.add_argument('--imsize', default=640, type=int, help='image size')
+    """ embedding size"""
     parser.add_argument('--emb_size', default=512, type=int,
                         help='fusion module embedding dimensions')
     # Vision-Language Transformer
-    parser.add_argument('--use_vl_type_embed', action='store_true',
-                        help="If true, use vl_type embedding")
+    parser.add_argument('--use_vl_type_embed', action='store_true', help="If true, use vl_type embedding")
+    """ VL 融合模块参数 """
     parser.add_argument('--vl_dropout', default=0.1, type=float,
                         help="Dropout applied in the vision-language transformer")
     parser.add_argument('--vl_nheads', default=8, type=int,
@@ -93,12 +101,16 @@ def get_args_parser():
                         help='Number of encoders in the vision-language transformer')
 
     # Dataset parameters
+    # TODO: --data_root /hdd/lhxiao/pseudo-q/data, Flickr30k  other  pseudo_samples
     parser.add_argument('--data_root', type=str, default='./data/image_data/',
                         help='path to ReferIt splits data folder')
+    # TODO: --split_root /hdd/lhxiao/pseudo-q/data/pseudo_samples, flickr  gref  gref_umd  referit  unc  unc+
+    #  这个目录和原始 ref 目录下的 'refs(google).p'  'refs(umd).p' 不同，划分更细致 unc_testA.pth  unc_testB.pth
+    #  unc_train_pseudo.pth  unc_val.pth，这个目录包含了 拆分和引用表达的句子
     parser.add_argument('--split_root', type=str, default='./data/pseudo_samples/',
                         help='location of pre-parsed dataset info')
-    parser.add_argument('--dataset', default='referit', type=str,
-                        help='referit/flickr/unc/unc+/gref')
+    # TODO: 数据集选择
+    parser.add_argument('--dataset', default='referit', type=str, help='referit/flickr/unc/unc+/gref')
     parser.add_argument('--max_query_len', default=20, type=int,
                         help='maximum time steps (lang length) per batch')
 
@@ -122,9 +134,11 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
     # evalutaion options
-    parser.add_argument('--eval_set', default='text', type=str)
+    # TODO: 评估子集的选择
+    parser.add_argument('--eval_set', default='test', type=str)  # 'testA', 'testB', 'val'
     parser.add_argument('--eval_model', default='', type=str)
 
+    # TODO: 从这里开始不一样
     # Prompt Engineering
     parser.add_argument('--prompt', type=str, default='{pseudo_query}',
                         help="Prompt template")
@@ -136,6 +150,7 @@ def get_args_parser():
     parser.add_argument('--cross_hidden_dropout_prob', default=0.1, type=float,
                         help='cross module hidden dropout probability')
     parser.add_argument('--cross_attention_probs_dropout_prob', default=0.1, type=float)
+    # TODO: 不一样结束
 
     return parser
 
@@ -160,8 +175,10 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
+
+    # n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_parameters = sum(p.numel() for p in model.parameters())
+    print('number of all params: ', n_parameters)
 
     # build dataset
     dataset_test = build_dataset(args.eval_set, args)
@@ -171,8 +188,7 @@ def main(args):
     else:
         sampler_test = torch.utils.data.SequentialSampler(dataset_test)
 
-    batch_sampler_test = torch.utils.data.BatchSampler(
-        sampler_test, args.batch_size, drop_last=False)
+    batch_sampler_test = torch.utils.data.BatchSampler(sampler_test, args.batch_size, drop_last=False)
 
     data_loader_test = DataLoader(dataset_test, args.batch_size, sampler=sampler_test,
                                   drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
@@ -192,6 +208,7 @@ def main(args):
     start_time = time.time()
 
     # perform evaluation
+    # TODO：核心推理计算
     accuracy = evaluate(args, model, data_loader_test, device)
 
     if utils.is_main_process():

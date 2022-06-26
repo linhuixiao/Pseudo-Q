@@ -21,6 +21,7 @@ from engine import train_one_epoch, validate
 def get_args_parser():
     parser = argparse.ArgumentParser('Pseudo-Q Args', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
+    # TODO: 这里面bert，resnet，transformer部分全都设置了学习率，在训练时，加载模型之后还是会全都训练
     parser.add_argument('--lr_bert', default=1e-5, type=float)
     parser.add_argument('--lr_visu_cnn', default=1e-5, type=float)
     parser.add_argument('--lr_visu_tra', default=1e-5, type=float)
@@ -29,8 +30,7 @@ def get_args_parser():
     parser.add_argument('--epochs', default=90, type=int)
     parser.add_argument('--lr_power', default=0.9, type=float, help='lr poly power')
     parser.add_argument('--lr_exponential', default=0.9, type=float, help='lr exponential')
-    parser.add_argument('--clip_max_norm', default=0., type=float,
-                        help='gradient clipping max norm')
+    parser.add_argument('--clip_max_norm', default=0., type=float, help='gradient clipping max norm')
     parser.add_argument('--eval', dest='eval', default=False, action='store_true', help='if evaluation only')
     parser.add_argument('--optimizer', default='adamw', type=str)
     parser.add_argument('--lr_scheduler', default='step', type=str)
@@ -50,19 +50,27 @@ def get_args_parser():
     parser.add_argument('--model_name', type=str, default='TransVG',
                         help="Name of model to be exploited.")
 
+    # Transformers in two branches
+    """两个分支 bert 和 detr 的数量 """
+    parser.add_argument('--bert_enc_num', default=12, type=int)
+    parser.add_argument('--detr_enc_num', default=6, type=int)
+
     # DETR parameters
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
+    # 默认是用 sine embedding
     parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine', 'learned'),
                         help="Type of positional embedding to use on top of the image features")
     # * Transformer
+    # TODO: DETR 编码层和解码层的数量，解码层数量为0
     parser.add_argument('--enc_layers', default=6, type=int,
                         help="Number of encoding layers in the transformer")
     parser.add_argument('--dec_layers', default=0, type=int,
                         help="Number of decoding layers in the transformer")
+    """ 前馈层的维度 """
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int,
@@ -71,23 +79,16 @@ def get_args_parser():
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_queries', default=100, type=int,
-                        help="Number of query slots")
+    # 查询的数量
+    parser.add_argument('--num_queries', default=100, type=int, help="Number of query slots")
     parser.add_argument('--pre_norm', action='store_true')
-
+    """ 图像的大小 """
     parser.add_argument('--imsize', default=640, type=int, help='image size')
+    """ embedding size"""
     parser.add_argument('--emb_size', default=512, type=int,
                         help='fusion module embedding dimensions')
-
-    # Prompt Engineering
-    parser.add_argument('--prompt', type=str, default='',
-                        help="Prompt template")
-
-    # Transformers in two branches
-    parser.add_argument('--bert_enc_num', default=12, type=int)
-    parser.add_argument('--detr_enc_num', default=6, type=int)
-
     # Vision-Language Transformer
+    """ VL 融合模块参数 """
     parser.add_argument('--vl_dropout', default=0.1, type=float,
                         help="Dropout applied in the vision-language transformer")
     parser.add_argument('--vl_nheads', default=8, type=int,
@@ -100,14 +101,22 @@ def get_args_parser():
                         help='Number of encoders in the vision-language transformer')
 
     # Dataset parameters
+    """ 数据集根目录 """
+    # TODO: --data_root /hdd/lhxiao/pseudo-q/data, Flickr30k  other  pseudo_samples
     parser.add_argument('--data_root', type=str, default='./data/image_data/',
                         help='path to ReferIt splits data folder')
+    # TODO: --split_root /hdd/lhxiao/pseudo-q/data/pseudo_samples, flickr  gref  gref_umd  referit  unc  unc+
+    #  这个目录和原始 ref 目录下的 'refs(google).p'  'refs(umd).p' 不同，划分更细致 unc_testA.pth  unc_testB.pth
+    #  unc_train_pseudo.pth  unc_val.pth，这个目录包含了 拆分和引用表达的句子
     parser.add_argument('--split_root', type=str, default='./data/pseudo_samples/',
                         help='location of pre-parsed dataset info')
     parser.add_argument('--dataset', default='referit', type=str,
                         help='referit/unc/unc+/gref/gref_umd')
     parser.add_argument('--max_query_len', default=20, type=int,
                         help='maximum time steps (lang length) per batch')
+
+    # Prompt Engineering
+    parser.add_argument('--prompt', type=str, default='', help="Prompt template")
 
     # Cross module structure
     parser.add_argument('--cross_num_attention_heads', default=1, type=int, help='cross module attention head number')
@@ -138,11 +147,14 @@ def get_args_parser():
 
 
 def main(args):
+    """ GPU 分布式初始化代码 """
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
 
     device = torch.device(args.device)
 
+    # # fix the seed for reproducibility
+    # seed 默认是 13
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -150,23 +162,27 @@ def main(args):
     print('### INFO ### torch.backends.cudnn.benchmark = {}'.format(torch.backends.cudnn.benchmark))
 
     # build model
+    # TODO： 核心一步，初始化模型结构，TransVG(args)
     model = build_model(args)
     model.to(device)
 
     model_without_ddp = model
+    # args.distributed 在 init_distributed_mode 中赋值为 true，args.gpu 也是
     if args.distributed:
+        # 分布式数据并行
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
+
+    # TODO：统计的参数默认都是需要梯度的，但是 Bert 在模型内部（bert.py）设置了根据学习率是否需要更新
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
 
-    visu_cnn_param = [p for n, p in model_without_ddp.named_parameters() if
-                      (("visumodel" in n) and ("backbone" in n) and p.requires_grad)]
-    visu_tra_param = [p for n, p in model_without_ddp.named_parameters() if
-                      (("visumodel" in n) and ("backbone" not in n) and p.requires_grad)]
+    # TODO：开始构建训练模型，从此开始代码和测试时不一样
+    # TODO：什么意思？
+    visu_cnn_param = [p for n, p in model_without_ddp.named_parameters() if (("visumodel" in n) and ("backbone" in n) and p.requires_grad)]
+    visu_tra_param = [p for n, p in model_without_ddp.named_parameters() if (("visumodel" in n) and ("backbone" not in n) and p.requires_grad)]
     text_tra_param = [p for n, p in model_without_ddp.named_parameters() if (("textmodel" in n) and p.requires_grad)]
-    rest_param = [p for n, p in model_without_ddp.named_parameters() if
-                  (("visumodel" not in n) and ("textmodel" not in n) and p.requires_grad)]
+    rest_param = [p for n, p in model_without_ddp.named_parameters() if (("visumodel" not in n) and ("textmodel" not in n) and p.requires_grad)]
 
     param_list = [{"params": rest_param},
                   {"params": visu_cnn_param, "lr": args.lr_visu_cnn},
@@ -175,8 +191,7 @@ def main(args):
                   ]
     visu_param = [p for n, p in model_without_ddp.named_parameters() if "visumodel" in n and p.requires_grad]
     text_param = [p for n, p in model_without_ddp.named_parameters() if "textmodel" in n and p.requires_grad]
-    rest_param = [p for n, p in model_without_ddp.named_parameters() if
-                  (("visumodel" not in n) and ("textmodel" not in n) and p.requires_grad)]
+    rest_param = [p for n, p in model_without_ddp.named_parameters() if (("visumodel" not in n) and ("textmodel" not in n) and p.requires_grad)]
 
     # using RMSProp or AdamW
     if args.optimizer == 'rmsprop':
@@ -191,6 +206,7 @@ def main(args):
         raise ValueError('Lr scheduler type not supportted ')
 
     # using polynomial lr scheduler or half decay every 10 epochs or step
+    # 多项式学习率调度，或者每10 epoch 衰减一半
     if args.lr_scheduler == 'poly':
         lr_func = lambda epoch: (1 - epoch / args.epochs) ** args.lr_power
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_func)
@@ -209,31 +225,37 @@ def main(args):
         raise ValueError('Lr scheduler type not supportted ')
 
     # build dataset
+    # TODO: 构建训练数据集和验证数据集，此部分代码和测试不一样，这里只是把原先的train变成train_pseudo，后续路径同样会这样变化
     dataset_train = build_dataset('train_pseudo', args)
     dataset_val = build_dataset('val', args)
     if args.distributed:
+        # 分布式数据并行，分布式数据并行采样
         sampler_train = DistributedSampler(dataset_train, shuffle=True)
         sampler_val = DistributedSampler(dataset_val, shuffle=False)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    batch_sampler_train = torch.utils.data.BatchSampler(
-        sampler_train, args.batch_size, drop_last=True)
-
+    batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, args.batch_size, drop_last=True)
+    # TODO：为什么在训练时，需要使用 batch_sampler，而在测试时直接用 DataLoader 进行batch_size load
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers)
     data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
 
+    # TODO: 注意，如下并没有对bert模型部分进行判定，因为bert部分在模型声明时已经加载进入，同时设置了参数可根据学习率是否大于0更新
     if args.resume:
+        # 断点续训
         checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'])
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
+    # TODO: 这里的 DETR模型是 visual_model部分，属于定制的预训练模型，包含了 Resnet 和 TransformerEncoder，需要对state_dict重新加载，
+    #  同时训练时也设置了会更新
     elif args.detr_model is not None:
+        # 用训好的 detr 模型
         checkpoint = torch.load(args.detr_model, map_location='cpu')
         missing_keys, unexpected_keys = model_without_ddp.visumodel.load_state_dict(checkpoint['model'], strict=False)
         print('Missing keys when loading detr model:')
@@ -249,11 +271,10 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             sampler_train.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            args, model, data_loader_train, optimizer, device, epoch, args.clip_max_norm
-        )
+        # TODO: 核心部分，开始训练
+        train_stats = train_one_epoch(args, model, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         lr_scheduler.step()
-
+        # TODO：进行验证
         val_stats = validate(args, model, data_loader_val, device)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},

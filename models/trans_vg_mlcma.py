@@ -17,6 +17,7 @@ class TransVG_MLCMA(nn.Module):
 
         self.visumodel = build_detr(args)
         self.textmodel = build_bert(args)
+        # TODO: 多了这个cross_module
         self.cross_module = cross_module(args)
 
         num_total = self.num_visu_token + self.num_text_token + 1
@@ -50,6 +51,7 @@ class TransVG_MLCMA(nn.Module):
         tgt_src = self.reg_token.weight.unsqueeze(1).repeat(1, bs, 1)
         tgt_mask = torch.zeros((bs, 1)).to(tgt_src.device).to(torch.bool)
 
+        # TODO: 多了这个cross_module
         text_src, visu_src = self.cross_module(visu_src, text_src, visu_mask, text_mask)
         visu_src = self.visu_proj(visu_src)  # (N*B)xC
         text_src = self.text_proj(text_src)
