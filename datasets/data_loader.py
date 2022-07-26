@@ -25,6 +25,7 @@ from PIL import Image
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from utils.word_utils import Corpus
 
+import clip
 
 def read_examples(input_line, unique_id):
     """Read a list of `InputExample`s from an input file."""
@@ -220,6 +221,9 @@ class TransVGDataset(data.Dataset):
         for split in splits:
             imgset_file = '{0}_{1}.pth'.format(self.dataset, split)
             imgset_path = osp.join(dataset_path, imgset_file)
+            # print('\nimgset_path:\n', imgset_path)
+            """ imgset_path: /data_SSD1/lhxiao/pseudo-q/data/pseudo_samples/unc/unc_testA.pth """
+            # 从侧面印证了所加载的照片，只是从预先分割和设定好的 pth 包中进行加载
             self.images += torch.load(imgset_path)
 
         if self.prompt_template:
@@ -262,6 +266,11 @@ class TransVGDataset(data.Dataset):
             if self.dataset == 'flickr':
                 tmp_sample = (sample_list[i][0], sample_list[i][1], self.prompt_template.replace('{pseudo_query}', sample_list[i][2]))
             else:
+                # print("\nsample_list:\n", sample_list[i])
+                #  ('COCO_train2014_000000000839.jpg', '482127.pth', [303.58, 69.03, 293.29, 425.79],
+                #  'guy flopping around on the right', [('r1', ['guy']), ('r2', ['none']), ('r3', ['none']),
+                #  ('r4', ['none']), ('r5', ['none']), ('r6', ['none']), ('r7', ['none']),
+                #  ('r8', ['right', 'flopping', 'around'])])
                 tmp_sample = (sample_list[i][0], sample_list[i][1], sample_list[i][2],
                               self.prompt_template.replace('{pseudo_query}', sample_list[i][3]), sample_list[i][4])
             new_sample_list.append(tmp_sample)
@@ -270,6 +279,7 @@ class TransVGDataset(data.Dataset):
     def __len__(self):
         return len(self.images)
 
+    # TODO: 核心函数
     def __getitem__(self, idx):
         img, phrase, bbox = self.pull_item(idx)
         phrase = phrase.lower()
@@ -279,6 +289,9 @@ class TransVGDataset(data.Dataset):
         bbox = input_dict['box']
         phrase = input_dict['text']
         img_mask = input_dict['mask']
+        # print("\nphrase is： ", phrase)
+        # print("\n phrase datatype: ", phrase.type())
+        # phrase is：  find the region that corresponds to the description guy flopping around on the right
 
         if self.lstm:
             phrase = self.tokenize_phrase(phrase)
@@ -287,11 +300,42 @@ class TransVGDataset(data.Dataset):
         else:
             ## encode phrase to bert input
             examples = read_examples(phrase, idx)
+            # print("\nexamples: ", examples)
+            # examples:  [<datasets.data_loader.InputExample object at 0x7fead0460e20>]
             features = convert_examples_to_features(
                 examples=examples, seq_length=self.query_len, tokenizer=self.tokenizer)
+            # print("\nfeatures:", features)
+            # features: [<datasets.data_loader.InputFeatures object at 0x7fead0512700>]
             word_id = features[0].input_ids
+            # print("\nword_id: ", word_id)
+            # word_id:  [101, 2424, 1996, 2555, 2008, 14788, 2000, 1996, 6412, 3124, 28583, 4691, 2105, 2006, 1996, 2157, 102, 0, 0, 0]
             word_mask = features[0].input_mask
+            # print("\nword_mask: ", word_mask)
+            # word_mask:  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
 
+        # print("\n word_id array: ", np.array(word_id, dtype=int))
+        # print("\n word_mask array: ", np.array(word_mask, dtype=int))
+
+        # text_token = clip.tokenize(phrase)  # 计算结果是二维数组
+        # text = text_token.int()[0, :20].numpy().tolist()
+        # text_mask1 = torch.tensor(text_token > 0).int()[0, :20].numpy().tolist()
+        # text_mask2 = (text_token.clone() > 0).int()[0, :20].numpy().tolist()
+        # text_mask2 = (text_token.clone() > 0).int()[0, :20].tolist()  # 最终写法
+        # print("\ntext: ", text)
+        # print("\nmask1: ", text_mask1)
+        # print("\nmask2: ", text_mask2)
+        # text_array = np.array(text[:20])
+        # text_mask_array = np.array(text_mask[:20])
+
+        # test = np.array([49406, 1416, 518, 4341, 682, 851, 17436, 531, 518, 13951, 5931, 1155, 5253, 786, 49407, 0, 0, 0, 0, 0])
+        # test1 = np.array([406, 1416, 518, 4341, 682, 851, 7436, 531, 518, 13951, 5931, 1155, 5253, 786, 9407, 0, 0, 0, 0, 0])
+        # test_array = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0])
+
+        # test_array = np.array()
+
+        # print("\ntext_array: ", text_array)
+        # print("\ntext_mask_array: ", text_mask_array)
+        #old code
         if self.testmode:
             return img, np.array(word_id, dtype=int), np.array(word_mask, dtype=int), \
                    np.array(bbox, dtype=np.float32), np.array(ratio, dtype=np.float32), \
@@ -299,3 +343,13 @@ class TransVGDataset(data.Dataset):
         else:
             # print(img.shape)
             return img, np.array(img_mask), np.array(word_id, dtype=int), np.array(word_mask, dtype=int), np.array(bbox, dtype=np.float32)
+
+        # if self.testmode:
+        #     return img, np.array(word_id, dtype=int), np.array(word_mask, dtype=int), \
+        #            np.array(bbox, dtype=np.float32), np.array(ratio, dtype=np.float32), \
+        #            np.array(dw, dtype=np.float32), np.array(dh, dtype=np.float32), self.images[idx][0]
+        # else:
+        #     # print(img.shape)
+        #     # return img, np.array(img_mask), np.array(word_id, dtype=int), np.array(word_mask, dtype=int), np.array(bbox, dtype=np.float32)
+        #     # return img, np.array(img_mask), np.array(text, dtype=int), np.array(text_mask, dtype=int), np.array(bbox, dtype=np.float32)
+        #     return img, np.array(img_mask), test1, test_array, np.array(bbox, dtype=np.float32)

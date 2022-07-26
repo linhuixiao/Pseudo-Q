@@ -31,15 +31,25 @@ class TransVG_MLCMA(nn.Module):
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
 
     def forward(self, img_data, text_data):
+        # img_data, text_data 都是 nested tensor，里面有两组数据，都已经在device上；
+        # print("\n img_data shape: ", img_data.tensors.shape)  # torch.Size([128, 3, 640, 640])
+        # print("\n img_data type: ", img_data.tensors.type())  # torch.cuda.FloatTensor
+        # print("\n img_data mask shape: ", img_data.mask.shape)  # torch.Size([128, 640, 640])
+        # print("\n text_data shape: ", text_data.tensors.shape)  # torch.Size([128, 20])
+        # print("\n text_data mask shape: ", text_data.mask.shape)  # torch.Size([128, 20])
+        # print("\n text_data is: ", text_data.tensors)
+
         bs = img_data.tensors.shape[0]
 
         # visual backbone
         visu_mask, visu_src = self.visumodel(img_data)
+        # print("\nvisu_mask shape: ", visu_mask.size())  # torch.Size([128, 400])
         # visu_src = self.visu_proj(visu_src) # (N*B)xC
 
         # language bert
         text_fea = self.textmodel(text_data)
         text_src, text_mask = text_fea.decompose()
+        # print("\ntext_src shape: ", text_src.shape)  # torch.Size([128, 20, 768])
         assert text_mask is not None
 
         # text_src = self.text_proj(text_src)
