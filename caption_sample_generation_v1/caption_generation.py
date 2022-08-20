@@ -16,6 +16,8 @@ from transformers import CLIPModel, CLIPProcessor
 import spacy
 from entity_extraction import Entity
 from spacy.tokens.token import Token
+from nltk.stem import WordNetLemmatizer
+from nltk import word_tokenize
 from typing import Dict, Any, Callable, List, Tuple, NamedTuple
 
 
@@ -831,6 +833,7 @@ def get_chunks(doc) -> Dict[int, Any]:
 
 def parse_captions(nlp, image_captions):
     entities = []
+    wnl = WordNetLemmatizer()
     for img_cap in image_captions:
         # spacy 是工业级的NLP处理库，下述代码表示用 spacy 导入英文词汇解析库 en_core_web_sm 生成 NLP 工具对象 nlp
 
@@ -844,7 +847,10 @@ def parse_captions(nlp, image_captions):
             head = list(doc.noun_chunks)[0]
             entity = Entity.extract(head.root.head, chunks)
 
-        entities.append(entity.text)  # entity.head 则是 Span 类型
+        if entity is not None:
+            entities.append([wnl.lemmatize(i).lower() for i in word_tokenize(entity.text)])  # entity.head 则是 Span 类型
+        else:
+            entities.append(["no_object"])
 
     return entities
 
@@ -853,28 +859,34 @@ def generate_caption(people_descriptor, clothes_descriptor, things_descriptor, i
                      image_captions, entity, caption_train_samples, each_image_query=10):
     all_candidate = []
     for cls, value in people_descriptor.items():
-        for i in range(len(entity)):
-            if entity[i] == cls:
-                caption_string = image_captions[i]
-                tmp_caption_sample = [image_file, 'useless placeholder', value['bbox'][:4],
-                                      caption_string, 'useless placeholder']
-                all_candidate.append(tmp_caption_sample)
+        for k in range(len(value)):
+            for i in range(len(entity)):
+                for j in range(len(entity[i])):
+                    if entity[i][j] == value[k]['class']:  # 也可以用cls 代替 value[k]('class')
+                        caption_string = image_captions[i]
+                        tmp_caption_sample = [image_file, 'useless placeholder', value[k]['bbox'][:4],
+                                              caption_string, 'useless placeholder']
+                        all_candidate.append(tmp_caption_sample)
 
     for cls, value in clothes_descriptor.items():
-        for i in range(len(entity)):
-            if entity[i] == cls:
-                caption_string = image_captions[i]
-                tmp_caption_sample = [image_file, 'useless placeholder', value['bbox'][:4],
-                                      caption_string, 'useless placeholder']
-                all_candidate.append(tmp_caption_sample)
+        for k in range(len(value)):
+            for i in range(len(entity)):
+                for j in range(len(entity[i])):
+                    if entity[i][j] == value[k]['class']:  # 也可以用cls 代替 value[k]('class')
+                        caption_string = image_captions[i]
+                        tmp_caption_sample = [image_file, 'useless placeholder', value[k]['bbox'][:4],
+                                              caption_string, 'useless placeholder']
+                        all_candidate.append(tmp_caption_sample)
 
     for cls, value in things_descriptor.items():
-        for i in range(len(entity)):
-            if entity[i] == cls:
-                caption_string = image_captions[i]
-                tmp_caption_sample = [image_file, 'useless placeholder', value['bbox'][:4],
-                                      caption_string, 'useless placeholder']
-                all_candidate.append(tmp_caption_sample)
+        for k in range(len(value)):
+            for i in range(len(entity)):
+                for j in range(len(entity[i])):
+                    if entity[i][j] == value[k]['class']:  # 也可以用cls 代替 value[k]('class')
+                        caption_string = image_captions[i]
+                        tmp_caption_sample = [image_file, 'useless placeholder', value[k]['bbox'][:4],
+                                              caption_string, 'useless placeholder']
+                        all_candidate.append(tmp_caption_sample)
 
     # list 居然可以用 + 进行增加
     if len(all_candidate) < each_image_query:
@@ -968,7 +980,6 @@ if __name__ == '__main__':
         image_captions = get_img_captions(coco_cap_data, args.image_id)  # 这是一个长度不定的list
         entity = parse_captions(nlp, image_captions)
 
-
         # TODO: 1、对图像检测结果进行筛选
         #  对一副图片的物体检测的多个结果进行解析，对属性按人类、衣服类、物品类3类依次进行判断分类，得出人体描述符、衣服描述符、物品描述符三个字典列表
         people_descriptor, clothes_descriptor, things_descriptor = object_detect(image_object_detection_result)
@@ -1003,13 +1014,13 @@ if __name__ == '__main__':
                                                  each_image_query=args.each_image_query)
 
         # TODO: 4、把人物描述器和衣服描述器做匹配，把衣服描述器描述的内容复制到人物描述器上，同时生成bbox在图片中的位置（上下左右）
-        descriptor = process_of_descriptor(people_descriptor, clothes_descriptor, things_descriptor, im.shape[:2])  # image size: (h, w)
+        # descriptor = process_of_descriptor(people_descriptor, clothes_descriptor, things_descriptor, im.shape[:2])  # image size: (h, w)
         # TODO: 5、选择置信度最高的top-n个bbox
-        descriptor = topn_conf_samples(descriptor, topn=args.topn)
+        # descriptor = topn_conf_samples(descriptor, topn=args.topn)
         # TODO: 6、最核心的部分，对最终选择的topn个bbox，生成伪描述，按照固定模板纯手工构造，descriptor 没有任何变化, descriptor 一直在append扩大
         # print("\ndescriptor:\n ", descriptor)
-        descriptor, pseudo_train_samples = generate_description(descriptor, args.image_file, pseudo_train_samples,
-                                                                each_image_query=args.each_image_query)
+        # descriptor, pseudo_train_samples = generate_description(descriptor, args.image_file, pseudo_train_samples,
+        #                                                         each_image_query=args.each_image_query)
         # print("\n descriptor2:\n", descriptor)
         # print("\n pseudo_train_samples:\n ", pseudo_train_samples)
 
